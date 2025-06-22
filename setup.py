@@ -7,6 +7,16 @@ version = (
     .stdout.decode("utf-8")
     .strip()
 )
+
+if "-" in version:
+    # when not on tag, git describe outputs: "1.3.3-22-gdf81228"
+    # pip has gotten strict with version numbers
+    # so change it to: "1.3.3+22.git.gdf81228"
+    # See: https://peps.python.org/pep-0440/#local-version-segments
+    v, i, s = version.split("-")
+    version = v + "+" + i + ".git." + s
+
+assert "-" not in version
 assert "." in version
 
 with open("VERSION", "w", encoding="utf-8") as f:
@@ -31,7 +41,7 @@ setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    install_requires=[],
+    install_requires=["anyio>=4.0"],
     extras_require={
         "dev": ["twine>=6.1.0"],
     },

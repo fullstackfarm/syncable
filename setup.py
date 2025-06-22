@@ -31,7 +31,7 @@ setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    install_requires=[],
+    install_requires=["anyio>=4.0"],
     extras_require={
         "dev": ["twine>=6.1.0"],
     },

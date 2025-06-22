@@ -11,18 +11,26 @@ from anyio.from_thread import run as run_async_from_worker_thread
 from functools import wraps
 from typing import Any, Awaitable, Callable, TypeVar, Union
 
-T = TypeVar("T")
-P = TypeVar("P")
+# Used to represent the return type of the async function being decorated, 
+# allowing syncable to be generic.
+T = TypeVar("T")  
 
 # Global thread portal for managing a persistent event loop
 _global_event_loop = None
 _global_event_loop_thread = None
-_global_event_loop_lock = threading.Lock()  # Add a lock
+_global_event_loop_lock = threading.Lock()
 
 
 def get_global_event_loop():
     """
-    Returns a global event loop for synchronous contexts. If no loop exists, it creates one.
+    Retrieve or create a global asyncio event loop running in a background thread.
+
+    This function ensures that only one global event loop is created and shared across
+    synchronous contexts that need to run asynchronous code. If the loop does not exist
+    or is not running, it creates a new event loop and starts it in a dedicated daemon thread.
+
+    Returns:
+        asyncio.AbstractEventLoop: The global event loop instance.
     """
     global _global_event_loop, _global_event_loop_thread
 
@@ -39,7 +47,13 @@ def get_global_event_loop():
 
 def _run_event_loop(loop):
     """
-    Runs the event loop in a separate thread.
+    Run the provided asyncio event loop in the current thread.
+
+    This function is intended to be used as the target for a background thread.
+    It sets the given event loop as the current thread's event loop and runs it forever.
+
+    Args:
+        loop (asyncio.AbstractEventLoop): The event loop to run.
     """
     asyncio.set_event_loop(loop)
     loop.run_forever()
@@ -47,7 +61,16 @@ def _run_event_loop(loop):
 
 def is_async_fn(func: Callable[..., Any]) -> bool:
     """
-    Returns `True` if a function is an async function.
+    Determine if a function is an async coroutine function.
+
+    This function unwraps any decorators and checks if the underlying function
+    is defined with `async def`.
+
+    Args:
+        func (Callable[..., Any]): The function to check.
+
+    Returns:
+        bool: True if the function is an async coroutine function, False otherwise.
     """
     while hasattr(func, "__wrapped__"):
         func = func.__wrapped__
@@ -56,7 +79,16 @@ def is_async_fn(func: Callable[..., Any]) -> bool:
 
 def is_async_gen_fn(func: Callable[..., Any]) -> bool:
     """
-    Returns `True` if a function is an async generator.
+    Determine if a function is an async generator function.
+
+    This function unwraps any decorators and checks if the underlying function
+    is defined as an async generator (`async def` with `yield`).
+
+    Args:
+        func (Callable[..., Any]): The function to check.
+
+    Returns:
+        bool: True if the function is an async generator function, False otherwise.
     """
     while hasattr(func, "__wrapped__"):
         func = func.__wrapped__
@@ -65,7 +97,11 @@ def is_async_gen_fn(func: Callable[..., Any]) -> bool:
 
 def in_async_main_thread() -> bool:
     """
-    Returns `True` if the current thread is the main async thread.
+    Check if the current context is running inside an asyncio event loop.
+
+    Returns:
+        bool: True if running inside an active asyncio event loop (i.e., in an async context),
+              False otherwise.
     """
     try:
         asyncio.get_running_loop()
@@ -76,7 +112,14 @@ def in_async_main_thread() -> bool:
 
 def in_async_worker_thread() -> bool:
     """
-    Returns `True` if the current thread is an async worker thread.
+    Check if the current thread is an AnyIO async worker thread.
+
+    This function inspects AnyIO's thread-local state to determine if the current
+    thread is managed by AnyIO as an async worker. This relies on AnyIO internals
+    and may break in future versions.
+
+    Returns:
+        bool: True if in an AnyIO async worker thread, False otherwise.
     """
     try:
         anyio.from_thread.threadlocals.current_async_backend
@@ -86,16 +129,27 @@ def in_async_worker_thread() -> bool:
         return True
 
 
-def syncable(async_fn: Callable[..., Awaitable[T]]) -> Callable[..., T]:
+def syncable(async_fn: Callable[..., Awaitable[T]]) -> Callable[..., Union[T, Awaitable[T]]]:
     """
-    Converts an async function into a dual async and sync function.
+    Decorator to make an async function callable from both sync and async contexts.
 
     When the returned function is called:
-    - If in an async context, it returns the coroutine for the caller to await.
+    - If in an async context, it returns the coroutine for the caller to await (type: Awaitable[T]).
     - If in a sync worker thread with access to an event loop, it submits the async
-      function to the event loop.
+      function to the event loop and blocks until the result is available (type: T).
     - If in a sync context with no event loop, it creates a new event loop to run
-      the async function.
+      the async function and blocks until the result is available (type: T).
+
+    Args:
+        async_fn (Callable[..., Awaitable[T]]): The async function to decorate.
+
+    Returns:
+        Callable[..., Union[T, Awaitable[T]]]: A function that returns either the awaited result (T)
+        or a coroutine (Awaitable[T]), depending on the calling context.
+
+    Raises:
+        TypeError: If the decorated function is not async.
+        ValueError: If the decorated function is an async generator.
     """
 
     if not is_async_fn(async_fn):

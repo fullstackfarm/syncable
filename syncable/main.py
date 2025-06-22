@@ -16,6 +16,7 @@ P = TypeVar("P")
 # Global thread portal for managing a persistent event loop
 _global_event_loop = None
 _global_event_loop_thread = None
+_global_event_loop_lock = threading.Lock()  # Add a lock
 
 
 def get_global_event_loop():
@@ -24,12 +25,13 @@ def get_global_event_loop():
     """
     global _global_event_loop, _global_event_loop_thread
 
-    if _global_event_loop is None or not _global_event_loop.is_running():
-        _global_event_loop = asyncio.new_event_loop()
-        _global_event_loop_thread = threading.Thread(
-            target=_run_event_loop, args=(_global_event_loop,), daemon=True
-        )
-        _global_event_loop_thread.start()
+    with _global_event_loop_lock:  # Ensure only one thread can create the loop at a time
+        if _global_event_loop is None or not _global_event_loop.is_running():
+            _global_event_loop = asyncio.new_event_loop()
+            _global_event_loop_thread = threading.Thread(
+                target=_run_event_loop, args=(_global_event_loop,), daemon=True
+            )
+            _global_event_loop_thread.start()
 
     return _global_event_loop
 

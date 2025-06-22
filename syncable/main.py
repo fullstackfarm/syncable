@@ -3,6 +3,7 @@ logger = logging.getLogger(__name__)
 
 import anyio
 import asyncio
+import contextvars
 import inspect
 import threading
 
@@ -116,7 +117,9 @@ def syncable(async_fn: Callable[..., Awaitable[T]]) -> Callable[..., T]:
             # In a sync context with no event loop, use the global event loop
             logger.debug(f"'{async_fn.__name__}' running in sync context with no event loop, using asyncio.run")
             loop = get_global_event_loop()
-            future = asyncio.run_coroutine_threadsafe(async_fn(*args, **kwargs), loop)
+            ctx = contextvars.copy_context()
+            coro = ctx.run(async_fn, *args, **kwargs)
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
             return future.result()
 
     # Attach the original async function for direct access if needed
